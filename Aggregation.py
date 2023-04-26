@@ -29,14 +29,6 @@ def smoothing(theta, n):
     theta_smooth = np.matmul(smoothing_matrix, theta)
     return theta_smooth
 
-
-
-
-
-
-
-
-
 def decompose_1(mean_theta1, theta1, bound1):  # 第一层分解
     judge = theta1 >= mean_theta1
     result = []
@@ -99,6 +91,24 @@ def Fmap(theta1, sample2, K):    #根据第一轮分布将sample映射到累积�
     return Fx
 
 
+# 完整区间的累积概率
+def getPComplete(h, width, index):
+    result = 0
+    for i in range(index):
+        result += (h[i] * width[i])
+    return result
+
+def FMap_2(samples, h, Quantile, K):
+    num = len(samples)
+    Fx = np.zeros(num)
+    width = [0] * K
+    for i in range(K):
+        width[i] = Quantile[i + 1] - Quantile[i]
+    for i in range(num):
+        Q_index = Find_Bucket(K, samples[i], Quantile)
+        Fx[i] = getPComplete(h, width, Q_index) + h[Q_index] * (samples[i] - Quantile[Q_index])
+    return Fx
+
 def get_frequency(cut, bound, theta):
     '''
     从输入区间和分布返回区间对应频率
@@ -118,7 +128,7 @@ def get_frequency(cut, bound, theta):
             frequency.append(f_sum)
             continue
         if (left_index + 1) <= (right_index - 1):  # 左右边界距离>=2
-            f_sum += np.sum(theta[(left_index + 1): (right_index - 1)])
+            f_sum += np.sum(theta[(left_index + 1): (right_index)])
         # 左边界频率
         f_sum += (bound[left_index + 1] - cut[i][0]) * (theta[left_index] / (bound[left_index + 1] - bound[left_index]))
         # print("左边界频率：", (bound[left_index + 1] - cut[i][0]) * (theta[left_index] / (bound[left_index + 1] - bound[left_index])))
@@ -131,7 +141,180 @@ def get_frequency(cut, bound, theta):
     #print("第二轮频率和=", sum(frequency))
     return np.array(frequency)
 
+def smooth2(h1, k):
+    spl = [[h1[i], h1[i], h1[i]] for i in range(len(h1))]
+    smoo = []
+    for index, item in enumerate(spl):
+        if index == len(spl) - 1:
+            smoo.extend(item)
+            break
 
+        hei = (item[2] - spl[index + 1][0]) / 3
+
+        if hei <= 0:
+            spl[index][2] += abs(hei)
+            spl[index + 1][0] -= abs(hei)
+        else:
+            spl[index][2] -= abs(hei)
+            spl[index + 1][0] += abs(hei)
+
+        smoo.extend(item)
+
+    return smoo
+
+def Find_Closest(LIST, DATA):
+    idx = np.abs(LIST - DATA).argmin()
+    return LIST[idx], idx
+
+
+def get_Y(point1, point2, Xlist):
+    """
+    根据point1和point2建立一条直线，返回Xlist中的各个横坐标对应的直线上的各个纵坐标Ylist。
+
+    参数：
+    point1：长度为2的列表，形如[x,y]，表示一个点，x为其横坐标，y为纵坐标。
+    point2：长度为2的列表，形如[x,y]，表示一个点，x为其横坐标，y为纵坐标。
+    Xlist：一个列表，里面存放有一些横坐标值。
+
+    返回值：
+    一个列表，包含与Xlist中每个横坐标对应的纵坐标值。
+    """
+    # 计算直线斜率
+    k = (point2[1] - point1[1]) / (point2[0] - point1[0])
+    # 计算直线截距
+    b = point1[1] - k * point1[0]
+    # 计算每个横坐标对应的纵坐标
+    Ylist = [k * x + b for x in Xlist]
+    return Ylist
+
+def get_frequency_2(cut, bound2, theta2, h1_3K, boundh1_3K):
+    '''
+    收集theta2关于cut中区间间隔的频率
+    :param cut: 区间列表
+    :param bound: 分布下标
+    :param theta: 分布频率
+    :return: 频率列表frequency
+    '''
+    K = len(bound2) - 1
+    frequency = []
+    remainder = -1
+    for i in range(len(cut)):
+        left_index = Find_Bucket(K, cut[i][0], bound2)
+        right_index = Find_Bucket(K, cut[i][1], bound2)
+        f_sum = 0
+        if left_index < right_index:
+            f_sum += np.sum(theta2[(left_index + 1): (right_index)]) #获取完整中部频率
+            #边界处理（斜率法）
+            # 左边界
+            if remainder!=-1:  #如果上一步右边界有余，则该步左边界为余数
+                f_sum += remainder
+                remainder = -1
+            else:
+                l_l = cut[i][0]
+                l_r = bound2[left_index + 1]
+                ll_closest, ll_closest_idx = Find_Closest(boundh1_3K, l_l)
+                lr_closest, lr_closest_idx = Find_Closest(boundh1_3K, l_r)
+                point1 = [ll_closest, h1_3K[ll_closest_idx]]
+                point2 = [lr_closest, h1_3K[lr_closest_idx]]
+                if point2[0] == point1[0]:
+                    f_sum += 0
+                    frequency.append(f_sum)
+                    remainder = -1
+                    continue
+                Xlist = [l_l, l_r, bound2[left_index]]
+                Ylist = get_Y(point1, point2, Xlist)
+                s = (sum([Ylist[0], Ylist[1]]) * (l_r - l_l)) / 2  # 小梯形面积
+                s_ALL = (sum([Ylist[1], Ylist[2]]) * (l_r-bound2[left_index])) / 2  # 该桶左右界总面积
+                f_sum += theta2[left_index] * (s / s_ALL)
+
+            #右边界
+            r_l = bound2[right_index]
+            r_r = cut[i][1]
+            if r_r==1.0:#达到最右端，且为完整区间
+                f_sum += theta2[-1]
+                frequency.append(f_sum)
+                continue
+            rl_closest, rl_closest_idx = Find_Closest(boundh1_3K, r_l)
+            rr_closest, rr_closest_idx = Find_Closest(boundh1_3K, r_r)
+            if rr_closest==1.0:
+                rr_closest_idx -= 1
+            point1 = [rl_closest, h1_3K[rl_closest_idx]]
+            point2 = [rr_closest, h1_3K[rr_closest_idx]]
+            if point2[0] == point1[0]:
+                f_sum += 0
+                frequency.append(f_sum)
+                remainder = -1
+                continue
+            Xlist = [r_l, r_r, bound2[right_index+1]]
+            Ylist = get_Y(point1, point2, Xlist)
+            s = (sum([Ylist[0],Ylist[1]])*(r_r-r_l))/2   #小梯形面积
+            s_ALL = (sum([Ylist[0],Ylist[2]])*(bound2[right_index+1]-r_l))/2  #该桶左右界总面积
+            f_sum += theta2[right_index]*(s/s_ALL)
+            if s!=s_ALL :  #有余
+                remainder = theta2[right_index] * (1 - (s / s_ALL))
+            else: #无余
+                remainder=-1
+
+
+        elif left_index == right_index:
+            if remainder != -1:
+                r_l = cut[i][0]
+                r_r = cut[i][1]
+                if r_r == 1.0:  # 达到最右端
+                    f_sum += remainder
+                    frequency.append(f_sum)
+                    continue
+                rl_closest, rl_closest_idx = Find_Closest(boundh1_3K, r_l)
+                rr_closest, rr_closest_idx = Find_Closest(boundh1_3K, r_r)
+                if rr_closest == 1.0:
+                    rr_closest_idx -= 1
+                point1 = [rl_closest, h1_3K[rl_closest_idx]]
+                point2 = [rr_closest, h1_3K[rr_closest_idx]]
+                if point2[0] == point1[0]:
+                    f_sum += 0
+                    frequency.append(f_sum)
+                    remainder = -1
+                    continue
+                Xlist = [r_l, r_r, bound2[right_index + 1]]
+                Ylist = get_Y(point1, point2, Xlist)
+                s = (sum([Ylist[0], Ylist[1]]) * (r_r - r_l)) / 2  # 小梯形面积
+                s_ALL = (sum([Ylist[0], Ylist[2]]) * (bound2[right_index + 1] - r_l)) / 2  # 该桶左右界总面积
+                f_sum += remainder * (s / s_ALL)
+                remainder = remainder * (1 - (s / s_ALL))
+            else:  #上步无余，正常处理右边界
+                # 右边界
+                r_l = bound2[right_index]
+                r_r = cut[i][1]
+                if r_r == 1.0:  # 达到最右端，且为完整区间
+                    f_sum += theta2[-1]
+                    frequency.append(f_sum)
+                    continue
+                rl_closest, rl_closest_idx = Find_Closest(boundh1_3K, r_l)
+                rr_closest, rr_closest_idx = Find_Closest(boundh1_3K, r_r)
+                if rr_closest == 1.0:
+                    rr_closest_idx -= 1
+                point1 = [rl_closest, h1_3K[rl_closest_idx]]
+                point2 = [rr_closest, h1_3K[rr_closest_idx]]
+                if point2[0] == point1[0]:
+                    f_sum += 0
+                    frequency.append(f_sum)
+                    remainder = -1
+                    continue
+                Xlist = [r_l, r_r, bound2[right_index + 1]]
+                Ylist = get_Y(point1, point2, Xlist)
+                s = (sum([Ylist[0], Ylist[1]]) * (r_r - r_l)) / 2  # 小梯形面积
+                s_ALL = (sum([Ylist[0], Ylist[2]]) * (bound2[right_index + 1] - r_l)) / 2  # 该桶左右界总面积
+                f_sum += theta2[right_index] * (s / s_ALL)
+                if s != s_ALL:  # 有余
+                    remainder = theta2[right_index] * (1 - (s / s_ALL))
+                else:  # 无余
+                    remainder = -1
+
+        frequency.append(f_sum)
+
+    assert len(frequency) == len(cut)
+    #print("第二轮频率和=", sum(frequency))
+    return np.array(frequency)
 
 def weighted_averaging(f1,f2,cut,theta1):
     '''
@@ -154,23 +337,6 @@ def weighted_averaging(f1,f2,cut,theta1):
         i+=1
     return np.array(f)
 
-# def norm_sub(f):    #非负且和为1
-#     n = len(f)
-#     f = np.array(f)
-#     while(True):
-#         index_nega = f<0
-#         f[index_nega] = 0  #负值置零
-#         f_sum = np.sum(f)  #总频率
-#         x = f_sum - 1  #总差值
-#         index_posi = f>0
-#         positive_num = np.sum(index_posi)
-#         y = x / positive_num  # 平均差值
-#         f[index_posi] -= y
-#         if(np.sum(f<0)==0):  #全正退出
-#             break
-#     print("norm_sub后频率",f)
-#     print("频率之和",sum(f))
-#     return f
 
 def norm_sub(f,SUM=1):    #非负且和为1
     n = len(f)
@@ -186,12 +352,12 @@ def norm_sub(f,SUM=1):    #非负且和为1
         f[index_posi] -= y
         if(np.sum(f<0)==0):  #全正退出
             break
-    print("norm_su后频率",f)
-    print("频率之和",sum(f))
+    #print("norm_su后频率",f)
+    #print("频率之和",sum(f))
     return f
 
 
-def consistency(theta, bound, frequency_1, cut_1):
+def consistency(theta, bound, frequency_1, cut_1, RoundNUM, h1_3K, boundh1_3K):
     '''
     根据第1层节点加权平均后的频率frequency_1对theta的频率一致化
     :param theta:原始频率
@@ -215,7 +381,12 @@ def consistency(theta, bound, frequency_1, cut_1):
         #print(tmp_bound)
         # 分割点化为区间
         tmp_interval = [[tmp_bound[i], tmp_bound[i+1]] for i in range(len(tmp_bound)-1)]
-        f_list = get_frequency(tmp_interval, bound, theta)
+        if RoundNUM==1:
+            f_list = get_frequency(tmp_interval, bound, theta)
+        elif RoundNUM==2:
+            f_list = get_frequency_2(tmp_interval, bound, theta, h1_3K, boundh1_3K)
+
+        #f_list = get_frequency(tmp_interval, bound, theta)
         #利用norm_sub一致化
         f_list_consistent = norm_sub(f_list, frequency_1[i])
         #恢复theta在bound上的频率
@@ -248,9 +419,6 @@ def consistency(theta, bound, frequency_1, cut_1):
 
 
 
-
-
-
 def get_Fdict(theta1, bound1, theta2, bound2):   #返回<'分割点'：累积分布>字典
     Fdict={}
     for i in range(len(bound1)):
@@ -268,8 +436,83 @@ def get_Fdict(theta1, bound1, theta2, bound2):   #返回<'分割点'：累积分
     return Fdict
 
 
+def restore(Alltheta, Allbound, K):
+    Alltheta = np.append(Alltheta, 0)
+    F_hat = np.zeros(K)
+    EqualBound = [i / K for i in range(K + 1)]  # 均匀横坐标边界
+    for i in range(K):
+        i1 = Allbound >= EqualBound[i]
+        i2 = Allbound < EqualBound[i+1]
+        index = i1 & i2
+        F_hat[i] = np.sum(Alltheta[index])
+    print(F_hat)
+    return F_hat
+
+def merge(F_hat, Map_equadisquantile, theta1, bound1, K):
+    f=[]
+    for i in range(K):
+        lenth1 = bound1[i+1]-bound1[i]
+        lenth2 = Map_equadisquantile[i+1]-Map_equadisquantile[i]
+        tmpf = theta1[i] * (lenth2 / (lenth1 + lenth2)) + F_hat[i] * (lenth1 / (lenth1 + lenth2))
+        f.append(tmpf)
+    f = np.array(f)
+    return f
+
+def TEST(theta1_consistent, EquaDisQuantile, theta2_consistent, h2, EquaDisQuantile_3K):
+    K = len(theta1_consistent)
+    # 桶宽
+    width = [EquaDisQuantile[i + 1] - EquaDisQuantile[i] for i in range(K)]
+    # 桶高
+    h = [theta1_consistent[i] / width[i] for i in range(K)]
+
+    # 第二轮统计
+    # 数据映射
+    # 平滑
+    h3 = smooth2(h, K)  # 得到3k个高度
+    # 映射的每个桶得高、宽、面积
+    EqualQuantitywidth = np.zeros(K)
+    for i in range(K):
+        EqualQuantitywidth[i] = EquaDisQuantile[i + 1] - EquaDisQuantile[i]
+    EqualQuantityHeight = theta2_consistent / EqualQuantitywidth
+
+    # 等距的分位点映射后的分位点
+    Map_equadisquantile = FMap_2(EquaDisQuantile, h3, EquaDisQuantile_3K, 3 * K)  ##非均匀分位点
+    # 映射后的分位点处的累计分布值
+    Cumulative_distribution = FMap_2(Map_equadisquantile, EqualQuantityHeight, EquaDisQuantile, K)
+    # 前后两个映射后的分位点处的累计分布值的差值即为该桶的频率
+    F_hat = np.zeros(K)
+    for i in range(K):
+        F_hat[i] = Cumulative_distribution[i + 1] - Cumulative_distribution[i]
+
+    F_hat = merge(F_hat, Map_equadisquantile, theta1_consistent, EquaDisQuantile, K)
+
+    return F_hat
+
+
+
+
+
+
+
+
+
+
+
+
 
 def aggregation(theta1, bound1, theta2, bound2):  ##主函数main()
+    K = len(theta1)
+    ####一些准备工作
+    # 分位点坐标
+    EquaDisQuantile = bound1
+    #第一轮桶宽
+    width = [EquaDisQuantile[i + 1] - EquaDisQuantile[i] for i in range(K)]
+    #第一轮桶高
+    h = [theta1[i] / width[i] for i in range(K)]
+    # 平滑到3*K
+    h2 = smooth2(h, K)  # 得到3k个高度
+    EquaDisQuantile_3K = [i / (3 * K) for i in range(3 * K + 1)]
+    ####end
     # 建树并初始化第0层的根节点
     TREE = Tree()
     TREE.create_node(tag='L-0N-0', identifier='L-0N-0', data=Nodex(np.array([0, 1]), 1.0))  # 根节点
@@ -278,7 +521,7 @@ def aggregation(theta1, bound1, theta2, bound2):  ##主函数main()
     # 对theta1按mean分割区间形成第1层区间和区间对应第一轮频率
     cut_1, frequency_1_1, flag_lowORhigh = decompose_1(mean_theta1, theta1, bound1)
     # 获取结点区间对应的第二轮频率
-    frequency_1_2 = get_frequency(cut_1, bound2, theta2)
+    frequency_1_2 = get_frequency_2(cut_1, bound2, theta2, h2,EquaDisQuantile_3K)
     # 加权平均两轮频率得到第1层结点频率
     frequency_1 = weighted_averaging(frequency_1_1,frequency_1_2,cut_1,theta1)
     #norm—sub
@@ -288,13 +531,13 @@ def aggregation(theta1, bound1, theta2, bound2):  ##主函数main()
         temp_tag = 'L-1N-' + str(i)
         TREE.create_node(tag=temp_tag, identifier=temp_tag, data=Nodex(cut_1[i], frequency_1[i], flag_lowORhigh), parent='L-0N-0')
         flag_lowORhigh = not flag_lowORhigh  #flag翻转
-    TREE.show()
+    #TREE.show()
     #################################################################################################################
 
     # 第2层###########################################################################################################
     #根据frequency_1对theta1和theta2进行norm_sub一致化处理
-    theta1_consistent, theta1_dict = consistency(theta1, bound1, frequency_1, cut_1) #<'i':[频率,间隔]>字典
-    theta2_consistent, theta2_dict = consistency(theta2, bound2, frequency_1, cut_1)
+    theta1_consistent, theta1_dict = consistency(theta1, bound1, frequency_1, cut_1, 1, h2, EquaDisQuantile_3K) #<'i':[频率,间隔]>字典
+    theta2_consistent, theta2_dict = consistency(theta2, bound2, frequency_1, cut_1, 2, h2, EquaDisQuantile_3K)###############改中############################
     #建第二层树
     node_num = 0
     for i in range(len(cut_1)):
@@ -309,22 +552,33 @@ def aggregation(theta1, bound1, theta2, bound2):  ##主函数main()
             temp_tag = 'L-2N-' + str(node_num)
             TREE.create_node(tag=temp_tag, identifier=temp_tag, data=Nodex(tmp_cut_2[j], tmp_freq_2[j]), parent=father_tag)
             node_num += 1
-    TREE.show()
+    #TREE.show()
     #################################################################################################################
 
     # 第3层##########################################################################################################
-    AllBound = np.append(bound1, bound2[1:-1])  #合并两轮分割点
-    AllBound.sort() #2d个分割点
-    Fdict = get_Fdict(theta1_consistent, bound1, theta2_consistent, bound2)
-    rawfreq = []
-    for i in range(len(AllBound)-1):
-        tmp_f = Fdict[str(AllBound[i+1])]-Fdict[str(AllBound[i])]
-        rawfreq.append(tmp_f)
-    print("rawfreq",rawfreq)
-    #对rawfreq非负化处理
-    finalfreq = norm_sub(rawfreq)
-    print("finalfreq",finalfreq)
-    return finalfreq, AllBound
+    F_hat = TEST(theta1_consistent, bound1, theta2_consistent, h2, EquaDisQuantile_3K)
+    return F_hat
+
+
+
+    #
+    #
+    # AllBound = np.append(bound1, bound2[1:-1])  #合并两轮分割点
+    # AllBound.sort() #2d个分割点
+    # Fdict = get_Fdict(theta1_consistent, bound1, theta2_consistent, bound2)
+    # rawfreq = []
+    # for i in range(len(AllBound)-1):
+    #     tmp_f = Fdict[str(AllBound[i+1])]-Fdict[str(AllBound[i])]
+    #     rawfreq.append(tmp_f)
+    # print("rawfreq",rawfreq)
+    # #对rawfreq非负化处理
+    # finalfreq = norm_sub(rawfreq)
+    # print("finalfreq",finalfreq)
+    # # 频率还原到K个桶里？？？
+    # F_hat = restore(finalfreq, AllBound, K)
+    # #F_hat = TEST(F_hat, K, cut_1, theta1, bound1)
+    # F_hat = smoothing(F_hat, K)
+    # return finalfreq, AllBound
 
 
 

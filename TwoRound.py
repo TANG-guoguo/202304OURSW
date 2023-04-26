@@ -92,8 +92,8 @@ def ROUND2(theta1, K, sample2, eps):
     #映射回去(实际上是下alpha分位点)
     EqualboundY = np.array([i / K for i in range(K + 1)])  # 等距边界Y
     bound = Rmap(theta1, K, EqualboundY)    #非等距边界
-    print("第一轮边界:", EqualboundY)
-    print("第二轮边界:", bound)
+    #print("第一轮边界:", EqualboundY)
+    #print("第二轮边界:", bound)
     return theta2, bound
 
 
@@ -125,10 +125,8 @@ def scheme1(K, sample1, sample2, eps):
     #第二轮统计 映射后再sw扰动 得到第二轮估计和边界
     theta2, bound2 = ROUND2(theta1, K, sample2, eps)
     #聚合两轮分布结果
-    Alltheta, Allbound = AG.aggregation(theta1, bound1, theta2, bound2)
-    #频率还原到K个桶里？？？
-    F_hat = restore(Alltheta, Allbound, K)
-    F_hat = smoothing(F_hat, K)
+    F_hat = AG.aggregation(theta1, bound1, theta2, bound2)
+
     return F_hat
 
 
@@ -166,8 +164,8 @@ if __name__=='__main__':
 
         variance_errors = []
 
-        #for eps in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75]:   #遍历eps
-        for eps in [0.5]:  # 遍历eps
+        for eps in [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75]:   #遍历eps
+        #for eps in [0.5]:  # 遍历eps
             kl_error = []
 
             emd_error = []
@@ -184,7 +182,7 @@ if __name__=='__main__':
 
             variance_error = []
 
-            for time in range(10):  #重复测试次数time
+            for time in range(20):  #重复测试次数time
 
                 if time % 10 == 0:
                     print(file, eps, time)
